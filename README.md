@@ -134,7 +134,7 @@ Primary group ID: 1000
 Primary group name: username
 Home directory: /home/username
 Shell: /bin/bash
-GECOS field: John Doe
+GECOS: John Doe
 Groups: username(1000), sudo(27), docker(998)
 
 Shadow Information (root only):

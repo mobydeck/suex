@@ -26,6 +26,10 @@ clean:
 fmt:
 	docker run --rm -v "$$PWD":/src -w /src alpine:latest sh -c "apk add --no-cache indent && indent -linux $(SRCS)"
 
+release-all:
+	$(MAKE) release
+	$(MAKE) release PROG=usrx
+
 .PHONY: release
 release: $(archs)
 
