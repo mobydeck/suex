@@ -92,6 +92,14 @@ Basic syntax:
 usrx COMMAND USER
 ```
 
+### `/etc/passwd` explained
+
+![/etc/passwd](assets/passwd.png)
+
+### `/etc/shadow` explained
+
+![/etc/shadow](assets/shadow.png)
+
 ### Available Commands
 
 Standard commands (available to all users):
