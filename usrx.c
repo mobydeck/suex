@@ -9,6 +9,7 @@
 #include <libgen.h>
 #include <errno.h>
 #include <crypt.h>
+#include <termios.h>
 
 static void usage(const char *progname)
 {
@@ -25,7 +26,11 @@ static void usage(const char *progname)
 	fprintf(stderr, "Root-only commands:\n");
 	fprintf(stderr, "  passwd - print encrypted password\n");
 	fprintf(stderr, "  days   - print password aging information\n");
-    fprintf(stderr, "  check USER PASSWORD - verify if password is correct\n");
+	fprintf(stderr,
+		"  check USER [PASSWORD] - verify if password is correct\n");
+	fprintf(stderr,
+		"                          (reads from stdin if PASSWORD not provided)\n");
+
 	exit(1);
 }
 
@@ -146,6 +151,60 @@ static int verify_password(const char *username, const char *password)
 	return strcmp(encrypted, sp->sp_pwdp) == 0 ? 0 : 1;
 }
 
+static char *read_password(void)
+{
+	char *password = malloc(1024);
+	if (password == NULL) {
+		fprintf(stderr, "Memory allocation failed\n");
+		return NULL;
+	}
+	// Check if stdin is a terminal
+	if (isatty(STDIN_FILENO)) {
+		struct termios old_flags, new_flags;
+
+		// Get current terminal settings
+		if (tcgetattr(STDIN_FILENO, &old_flags) != 0) {
+			fprintf(stderr, "Failed to get terminal attributes\n");
+			free(password);
+			return NULL;
+		}
+		// Disable echo
+		new_flags = old_flags;
+		new_flags.c_lflag &= ~ECHO;
+		if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_flags) != 0) {
+			fprintf(stderr, "Failed to set terminal attributes\n");
+			free(password);
+			return NULL;
+		}
+		// Prompt and read password
+		fprintf(stderr, "Password: ");
+		if (fgets(password, 1024, stdin) == NULL) {
+			tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_flags);
+			fprintf(stderr, "\nFailed to read password\n");
+			free(password);
+			return NULL;
+		}
+		// Restore terminal settings
+		tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_flags);
+		fprintf(stderr, "\n");
+	} else {
+		// Reading from pipe or redirect
+		if (fgets(password, 1024, stdin) == NULL) {
+			fprintf(stderr, "Failed to read password\n");
+			free(password);
+			return NULL;
+		}
+	}
+
+	// Remove trailing newline
+	size_t len = strlen(password);
+	if (len > 0 && password[len - 1] == '\n') {
+		password[len - 1] = '\0';
+	}
+
+	return password;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc < 3) {
@@ -203,12 +262,35 @@ int main(int argc, char *argv[])
 			print_shadow_days(sp);
 		}
 	} else if (strcmp(cmd, "check") == 0) {
-		if (argc != 4) {
-			fprintf(stderr, "Usage: %s check USER PASSWORD\n",
+		char *password;
+		int result;
+
+		if (argc == 3) {
+			// Read password from stdin
+			password = read_password();
+			if (password == NULL) {
+				return 1;
+			}
+		} else if (argc == 4) {
+			// Use password from command line
+			password = strdup(argv[3]);
+			if (password == NULL) {
+				fprintf(stderr, "Memory allocation failed\n");
+				return 1;
+			}
+		} else {
+			fprintf(stderr, "Usage: %s check USER [PASSWORD]\n",
 				argv[0]);
 			return 1;
 		}
-		return verify_password(username, argv[3]);
+
+		result = verify_password(username, password);
+
+		// Clean up sensitive data
+		explicit_bzero(password, strlen(password));
+		free(password);
+
+		return result;
 	} else {
 		usage(basename(argv[0]));
 	}

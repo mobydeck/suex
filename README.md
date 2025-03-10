@@ -107,7 +107,9 @@ Standard commands (available to all users):
 Root-only commands (requires root privileges):
 - `passwd` - Print user's encrypted password
 - `days` - Print detailed password aging information
-- `check USER PASSWORD` - Verify if the provided password is correct
+- `check USER [PASSWORD]` - Verify if the provided password is correct
+  - If PASSWORD is omitted, reads password securely from stdin
+  - Returns exit code 0 if password is correct, 1 if incorrect
 
 ### Examples
 
@@ -142,7 +144,9 @@ Shadow Information (root only):
 [password and aging information]
 ```
 
-Verify user password (requires root):
+### Password Verification Examples
+
+1. Exit codes:
 ```shell
 # Returns exit code 0 if password is correct, 1 if incorrect
 $ sudo usrx check username correctpassword
@@ -153,6 +157,28 @@ $ sudo usrx check username wrongpassword
 $ echo $?
 1
 ```
+
+2. Interactive password prompt:
+```shell
+$ sudo usrx check username
+Password: [hidden input]
+```
+
+3. Password from command line (less secure):
+```shell
+$ sudo usrx check username mypassword
+```
+
+4. Password from file:
+```shell
+$ sudo usrx check username <password.txt
+```
+
+5. Password from pipe:
+```shell
+$ echo "mypassword" | sudo usrx check username
+```
+
 
 Note: The `check` command does not produce any output - it only sets the exit code.
 For scripting, you can use it like this:
@@ -175,6 +201,11 @@ fi
     - Shell history
     - System logs
     - Other system monitoring tools
+    - When using file redirection or pipes, ensure that:
+        - The password file has appropriate permissions (600 or more restrictive)
+        - The password file is stored in a secure location
+        - The file is securely deleted after use
+        - The command is not visible in shell history
 - For production use, consider more secure password verification methods
 
 ## Attribution
