@@ -4,7 +4,7 @@ LDFLAGS ?=
 CC ?= gcc
 
 BUILDDIR ?= .
-PROG := suex
+PROG ?= suex
 SRCS := $(PROG).c
 
 archs = amd64 arm64
@@ -31,9 +31,9 @@ release: $(archs)
 
 $(archs):
 	mkdir -p release
-	$(MAKE) alpine-build-docker arch=$@
+	$(MAKE) alpine-build-docker arch=$@ PROG=$(PROG)
 	COPYFILE_DISABLE=true \
 	tar -czf ./release/$(PROG)-linux-$@.tgz LICENSE -C ./build $(PROG) $(PROG)-static
 
 alpine-build-docker:
-	docker run --rm -v "$$PWD":/src -w /src --platform linux/$(arch) alpine:latest sh -c "./alpine-build.sh $(PROG) $(SRCS)"
+	docker run --rm -v "$$PWD":/src -w /src -e PROG=$(PROG) --platform linux/$(arch) alpine:latest sh -c "./alpine-build.sh"

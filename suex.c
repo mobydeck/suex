@@ -1,5 +1,4 @@
 #include <sys/types.h>
-
 #include <stdarg.h>
 #include <err.h>
 #include <errno.h>
