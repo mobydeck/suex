@@ -25,6 +25,7 @@ static void usage(const char *progname)
 	fprintf(stderr, "Root-only commands:\n");
 	fprintf(stderr, "  passwd - print encrypted password\n");
 	fprintf(stderr, "  days   - print password aging information\n");
+    fprintf(stderr, "  check USER PASSWORD - verify if password is correct\n");
 	exit(1);
 }
 
