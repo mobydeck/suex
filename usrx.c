@@ -148,7 +148,7 @@ static int verify_password(const char *username, const char *password)
 
 int main(int argc, char *argv[])
 {
-	if (argc != 3) {
+	if (argc < 3) {
 		usage(basename(argv[0]));
 	}
 
