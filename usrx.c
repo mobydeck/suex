@@ -99,7 +99,7 @@ static void print_user_info(const char *username)
 	printf("Shell: %s\n", pw->pw_shell);
 
 	if (pw->pw_gecos && strlen(pw->pw_gecos) > 0) {
-		printf("GECOS field: %s\n", pw->pw_gecos);
+		printf("GECOS: %s\n", pw->pw_gecos);
 	}
 
 	print_groups(username, pw->pw_gid);
