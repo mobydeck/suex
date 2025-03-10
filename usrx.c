@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <errno.h>
+#include <crypt.h>
 
 static void usage(const char *progname)
 {
@@ -118,6 +119,32 @@ static void print_user_info(const char *username)
 	}
 }
 
+static int verify_password(const char *username, const char *password)
+{
+	struct spwd *sp;
+	char *encrypted;
+
+	if (getuid() != 0) {
+		fprintf(stderr, "This command requires root privileges\n");
+		return 1;
+	}
+
+	sp = getspnam(username);
+	if (sp == NULL) {
+		fprintf(stderr, "Failed to get shadow entry for '%s'\n",
+			username);
+		return 1;
+	}
+	// Encrypt the provided password with the salt from the shadow file
+	encrypted = crypt(password, sp->sp_pwdp);
+	if (encrypted == NULL) {
+		fprintf(stderr, "crypt() failed\n");
+		return 1;
+	}
+	// Compare the encrypted password with the one from shadow file
+	return strcmp(encrypted, sp->sp_pwdp) == 0 ? 0 : 1;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc != 3) {
@@ -174,6 +201,13 @@ int main(int argc, char *argv[])
 		} else {	// days
 			print_shadow_days(sp);
 		}
+	} else if (strcmp(cmd, "check") == 0) {
+		if (argc != 4) {
+			fprintf(stderr, "Usage: %s check USER PASSWORD\n",
+				argv[0]);
+			return 1;
+		}
+		return verify_password(username, argv[3]);
 	} else {
 		usage(basename(argv[0]));
 	}

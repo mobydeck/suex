@@ -22,10 +22,18 @@ privileges) password-related data.
 
 ## Key Features
 
+### `suex` features
 - Direct program execution (not spawning child processes)
 - Support for both username/group names and numeric uid/gid
 - Simpler and more streamlined than traditional `su`/`sudo`
 - Better TTY and signal handling
+
+### `usrx` features
+- Comprehensive user information querying from system files
+- Support for all standard user attributes (home, shell, groups, etc.)
+- Fast and efficient group membership resolution
+- Root-level access to shadow password information
+- Formatted output for both single values and complete user profiles
 
 ## `suex` usage
 
@@ -99,6 +107,7 @@ Standard commands (available to all users):
 Root-only commands (requires root privileges):
 - `passwd` - Print user's encrypted password
 - `days` - Print detailed password aging information
+- `check USER PASSWORD` - Verify if the provided password is correct
 
 ### Examples
 
@@ -133,14 +142,42 @@ Shadow Information (root only):
 [password and aging information]
 ```
 
+Verify user password (requires root):
+```shell
+# Returns exit code 0 if password is correct, 1 if incorrect
+$ sudo usrx check username correctpassword
+$ echo $?
+0
+
+$ sudo usrx check username wrongpassword
+$ echo $?
+1
+```
+
+Note: The `check` command does not produce any output - it only sets the exit code.
+For scripting, you can use it like this:
+
+```shell
+if sudo usrx check username userpassword; then
+    echo "Password is correct"
+else
+    echo "Password is incorrect"
+fi
+```
+
 ## Security Notes
 
 - The `passwd` and `days` commands require root privileges as they access `/etc/shadow`
 - When installed setuid root (`sudo chmod u+s usrx`), these commands become available to all users
 - Consider the security implications before setting the setuid bit
-
+- The `check` command receives password as a command line argument which may expose it in:
+    - Process listings (ps, top, etc.)
+    - Shell history
+    - System logs
+    - Other system monitoring tools
+- For production use, consider more secure password verification methods
 
 ## Attribution
 
-This project is a reimplementation of [su-exec](https://github.com/ncopa/su-exec),
+`suex` is a reimplementation of [`su-exec`](https://github.com/ncopa/su-exec),
 enhanced for improved usability and maintainability.
