@@ -8,6 +8,11 @@ permissions, `su` and `sudo` alternative.
 A companion utility for querying user information from system files (`/etc/passwd`, `/etc/group`,
 and `/etc/shadow`).
 
+# uarch
+
+A simple utility for displaying system architecture names in a standardized format, particularly
+useful for cross-platform development and build scripts.
+
 ## Purpose
 
 `suex` is a utility that allows you to run programs with different user and group privileges.
@@ -19,6 +24,9 @@ as child processes, which provides better handling of TTY and signals.
 `usrx` provides a simple command-line interface to retrieve various user-related information
 from system files. It can query basic user information, group memberships, and (with root
 privileges) password-related data.
+
+`uarch` is particularly useful in build scripts and CI/CD pipelines where consistent architecture
+naming is required across different platforms.
 
 ## Key Features
 
@@ -34,6 +42,12 @@ privileges) password-related data.
 - Fast and efficient group membership resolution
 - Root-level access to shadow password information
 - Formatted output for both single values and complete user profiles
+
+### `uarch` features
+- Maps system architecture to unofficial Linux architecture names
+- Handles special cases for macOS architecture reporting
+- Supports displaying original system architecture names
+- Works consistently across Linux and macOS platforms
 
 ## `suex` usage
 
@@ -89,7 +103,7 @@ PID   USER     TIME   COMMAND
 
 Basic syntax:
 ```shell
-usrx COMMAND USER
+usrx COMMAND [OPTIONS] USER
 ```
 
 ### `/etc/passwd` explained
@@ -100,10 +114,29 @@ usrx COMMAND USER
 
 ![/etc/shadow](assets/shadow.png)
 
+### Options
+
+For `info` command:
+- `-j` - Output information in JSON format
+- `-i` - Skip encrypted password in output (useful for secure information display)
+
 ### Available Commands
 
 Standard commands (available to all users):
 - `info` - Display all available information about the user
+  ```shell
+  # Standard output
+  $ usrx info username
+  
+  # JSON output
+  $ usrx info -j username
+  
+  # Skip sensitive information
+  $ usrx info -i username
+  
+  # JSON output without sensitive information
+  $ usrx info -j -i username
+  ```
 - `home` - Print user's home directory
 - `shell` - Print user's login shell
 - `gecos` - Print user's GECOS field
@@ -118,6 +151,37 @@ Root-only commands (requires root privileges):
 - `check USER [PASSWORD]` - Verify if the provided password is correct
   - If PASSWORD is omitted, reads password securely from stdin
   - Returns exit code 0 if password is correct, 1 if incorrect
+
+### JSON Output Format
+
+When using the `-j` option with the `info` command, the output is structured as follows:
+
+```json
+{
+  "user": "username",
+  "group": "primary_group",
+  "uid": 1000,
+  "gid": 1000,
+  "home": "/home/username",
+  "shell": "/bin/bash",
+  "gecos": "Full Name",
+  "groups": [
+    {"name": "group1", "gid": 1000},
+    {"name": "group2", "gid": 1001}
+  ],
+  "shadow": {
+    "encrypted_password": "...",
+    "last_change": 19168,
+    "min_days": 0,
+    "max_days": 99999,
+    "warn_days": 7,
+    "inactive_days": -1,
+    "expiration": -1
+  }
+}
+```
+
+Note: The `shadow` section is only included when running as root, and the `encrypted_password` field is omitted when using the `-i` option.
 
 ### Examples
 
@@ -150,6 +214,21 @@ Groups: username(1000), sudo(27), docker(998)
 Shadow Information (root only):
 -----------------------------
 [password and aging information]
+```
+
+Get user info in standard format:
+```shell
+$ usrx info username
+```
+
+Get user info in JSON format:
+```shell
+$ usrx info -j username
+```
+
+Get user info without sensitive data:
+```shell
+$ usrx info -i username
 ```
 
 ### Password Verification Examples
@@ -187,7 +266,6 @@ $ sudo usrx check username <password.txt
 $ echo "mypassword" | sudo usrx check username
 ```
 
-
 Note: The `check` command does not produce any output - it only sets the exit code.
 For scripting, you can use it like this:
 
@@ -199,7 +277,7 @@ else
 fi
 ```
 
-## Security Notes
+### Security Notes
 
 - The `passwd` and `days` commands require root privileges as they access `/etc/shadow`
 - When installed setuid root (`sudo chmod u+s usrx`), these commands become available to all users
@@ -215,6 +293,15 @@ fi
         - The file is securely deleted after use
         - The command is not visible in shell history
 - For production use, consider more secure password verification methods
+
+## `uarch` usage
+```shell
+uarch [-a]
+```
+
+Options:
+- `-a` - Print system architecture instead of unofficial name
+- `-h` - Show help message
 
 ## Attribution
 
