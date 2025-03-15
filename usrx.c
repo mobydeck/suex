@@ -53,36 +53,6 @@ static void print_shadow_days(const struct spwd *sp)
 	       sp->sp_expire);
 }
 
-static void print_groups(const char *username, gid_t primary_gid)
-{
-	struct group *gr;
-	int ngroups = 0;
-	gid_t *groups = NULL;
-
-	// Get number of groups
-	getgrouplist(username, primary_gid, NULL, &ngroups);
-
-	groups = malloc(ngroups * sizeof(gid_t));
-	if (groups == NULL) {
-		fprintf(stderr, "Memory allocation failed\n");
-		return;
-	}
-
-	if (getgrouplist(username, primary_gid, groups, &ngroups) != -1) {
-		printf("Groups: ");
-		for (int i = 0; i < ngroups; i++) {
-			gr = getgrgid(groups[i]);
-			if (gr != NULL) {
-				printf("%s(%d)%s", gr->gr_name, groups[i],
-				       (i < ngroups - 1 ? ", " : ""));
-			}
-		}
-		printf("\n");
-	}
-
-	free(groups);
-}
-
 // Helper function to print JSON string with proper escaping
 static void print_json_string(const char *str)
 {
@@ -121,37 +91,86 @@ static void print_json_string(const char *str)
 	printf("\"");
 }
 
-static void print_groups_json(const char *username, gid_t primary_gid)
+// Helper function to get groups for a user
+static gid_t *get_user_groups(const char *username, gid_t primary_gid,
+			      int *ngroups)
 {
-	struct group *gr;
-	int ngroups = 0;
-	gid_t *groups = NULL;
+	*ngroups = 0;
 
 	// Get number of groups
-	getgrouplist(username, primary_gid, NULL, &ngroups);
+	getgrouplist(username, primary_gid, NULL, ngroups);
 
-	groups = malloc(ngroups * sizeof(gid_t));
+	gid_t *groups = malloc(*ngroups * sizeof(gid_t));
+	if (groups == NULL) {
+		return NULL;
+	}
+
+	if (getgrouplist(username, primary_gid, groups, ngroups) == -1) {
+		free(groups);
+		return NULL;
+	}
+
+	return groups;
+}
+
+static void print_groups(const char *username, gid_t primary_gid)
+{
+	int ngroups;
+	gid_t *groups = get_user_groups(username, primary_gid, &ngroups);
+
+	if (groups == NULL) {
+		fprintf(stderr, "Failed to get groups\n");
+		return;
+	}
+
+	printf("Groups: ");
+	int first = 1;
+	for (int i = 0; i < ngroups; i++) {
+		if (groups[i] == primary_gid && !first) {
+			continue;
+		}
+		struct group *gr = getgrgid(groups[i]);
+		if (gr != NULL) {
+			if (!first) {
+				printf(", ");
+			}
+			printf("%s(%d)", gr->gr_name, groups[i]);
+			first = 0;
+		}
+	}
+	printf("\n");
+
+	free(groups);
+}
+
+static void print_groups_json(const char *username, gid_t primary_gid)
+{
+	int ngroups;
+	gid_t *groups = get_user_groups(username, primary_gid, &ngroups);
+
 	if (groups == NULL) {
 		printf("[]");
 		return;
 	}
 
-	if (getgrouplist(username, primary_gid, groups, &ngroups) != -1) {
-		printf("[");
-		for (int i = 0; i < ngroups; i++) {
-			gr = getgrgid(groups[i]);
-			if (gr != NULL) {
-				if (i > 0)
-					printf(",");
-				printf("{\"name\":");
-				print_json_string(gr->gr_name);
-				printf(",\"gid\":%d}", groups[i]);
-			}
+	printf("[");
+	int first = 1;
+	for (int i = 0; i < ngroups; i++) {
+		if (groups[i] == primary_gid && !first) {
+			continue;
 		}
-		printf("]");
-	} else {
-		printf("[]");
+		struct group *gr = getgrgid(groups[i]);
+		if (gr != NULL) {
+			if (!first) {
+				printf(",");
+			}
+			printf("{\"name\":");
+			print_json_string(gr->gr_name);
+			printf(",\"gid\":%d}", groups[i]);
+			first = 0;
+		}
 	}
+	printf("]");
 
 	free(groups);
 }
@@ -395,7 +414,6 @@ int main(int argc, char *argv[])
 			usage(basename(argv[0]));
 		}
 	}
-
 	// Get username from correct position
 	username = argv[2 + arg_offset];
 
