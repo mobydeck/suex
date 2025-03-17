@@ -4,6 +4,7 @@ LDFLAGS ?=
 CC ?= gcc
 
 BUILDDIR ?= .
+PROGS := suex sush usrx uarch
 PROG ?= suex
 SRCS := $(PROG).c
 
@@ -40,12 +41,25 @@ release: $(archs)
 
 $(archs):
 	mkdir -p release
-	$(MAKE) alpine-build-docker arch=$@ PROG=$(PROG)
-	COPYFILE_DISABLE=true \
-	tar -czf ./release/$(PROG)-linux-$@.tgz LICENSE -C ./build $(PROG) $(PROG)-static
+	$(MAKE) alpine-build-docker arch=$@
+	export COPYFILE_DISABLE=true; \
+	for PROG in $(PROGS); do \
+		tar -czf ./release/$$PROG-linux-$@.tgz LICENSE -C ./build $$PROG $$PROG-static; \
+	done
 
 alpine-build-docker:
-	docker run --rm -v "$$PWD":/src -w /src -e PROG=$(PROG) --platform linux/$(arch) alpine:latest sh -c "./alpine-build.sh"
+	docker run --rm -v "$$PWD":/src -w /src -e PROGS="$(PROGS)" --platform linux/$(arch) alpine:latest sh -c "./alpine-build.sh"
 
-check:
-	docker run --rm -v "$$PWD":/src -w /src -e PROG=usrx --platform linux/$(arch) alpine:latest sh -c "set -x && ./alpine-build.sh && (./build/usrx-static info -i root)"
+build-test-image:
+	docker buildx build -t suex-test -f test.dockerfile --platform linux/$(arch) .
+
+.PHONY: test-suex
+test-suex:
+	c=`docker run --rm -d --platform linux/$(arch) suex-test sh -c "tail -f /dev/null"`; \
+	docker cp Makefile $$c:/test/ ;\
+	docker cp suex-test.sh $$c:/test/ ;\
+	docker cp suex.c $$c:/test/ ;\
+	docker exec $$c make build ;\
+	docker exec $$c chmod +x suex-test.sh ;\
+	docker exec $$c ./suex-test.sh ;\
+	docker stop $$c
