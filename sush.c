@@ -149,6 +149,8 @@ int main(int argc, char *argv[])
 		NULL,		// LOGNAME
 		NULL,		// PATH
 		NULL,		// MAIL
+        NULL,       // TERM
+        NULL,       // LS_COLORS
 		NULL		// Terminator
 	};
 
@@ -181,6 +183,20 @@ int main(int argc, char *argv[])
 	char mail_env[MAX_PATH];
 	snprintf(mail_env, MAX_PATH, "MAIL=/var/mail/%s", pw->pw_name);
 	env_vars[5] = strdup(mail_env);
+
+	char *term = getenv("TERM");
+    if (term) {
+        char term_env[MAX_PATH];
+        snprintf(term_env, MAX_PATH, "TERM=%s", term);
+        env_vars[6] = strdup(term_env);
+    }
+
+    char *ls_colors = getenv("LS_COLORS");
+    if (ls_colors) {
+        char ls_colors_env[MAX_PATH];
+        snprintf(ls_colors_env, MAX_PATH, "LS_COLORS=%s", ls_colors);
+        env_vars[7] = strdup(ls_colors_env);
+    }
 
 	// Switch to target user's primary group
 	if (setgid(pw->pw_gid) != 0) {

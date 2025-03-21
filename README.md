@@ -1,6 +1,8 @@
 # `suex` & `sush` - Lightweight Privilege Management Tools
 
 A collection of lightweight utilities written in C for privilege management and system information, with a focus on simplicity and security.
+They provide essential functionality for privilege management, process execution, and system information gathering in environments where traditional solutions may be too heavyweight or introduce unwanted dependencies.
+Ideal for developers, DevOps workflows, CI/CD pipelines, and containerized applications where reliability and performance at scale are paramount.
 
 ## Core Utilities
 
@@ -31,10 +33,14 @@ A simple utility for displaying system architecture names in a standardized form
 #### Key Features
 
 - Direct program execution (not spawning child processes)
+- Dual privilege management model:
+    - For root users: Ability to step down to lower privileges (similar to `su`)
+    - For non-root users in the `suex` group: Ability to elevate to specific privileges or switch to any other user
 - Support for both username/group names and numeric uid/gid
 - Group-based access control (users in the `suex` group can execute commands with elevated privileges)
 - Better TTY and signal handling than traditional alternatives
 - Simpler and more streamlined than traditional `su`/`sudo`
+- Extremely useful in dynamic development environments, build and test containers, and ephemeral systems
 
 #### Usage
 
@@ -49,21 +55,32 @@ Where:
 - `COMMAND`: The program to execute
 - `ARGUMENTS`: Any additional arguments for the command
 
+You can also use the `@` or `+` prefix for the USER specification:
+```shell
+suex [@|+]USER[:GROUP] COMMAND [ARGUMENTS...]
+```
+
 #### Examples
 
-Run a command as a specific user and group:
+For root users (stepping down in privileges):
 ```shell
+# Run as a non-privileged user
+suex nobody /bin/program
+
+# Run with specific user and group
 suex nginx:www-data /usr/sbin/nginx -c /etc/nginx/nginx.conf
 ```
 
-Run a command as a specific user:
+For non-root users in the `suex` group (elevating or switching privileges):
 ```shell
-suex nobody /bin/program
-```
-
-Run a command as root (for non-root users in the suex group):
-```shell
+# Elevate to root
 suex /bin/program
+
+# Switch to a different user
+suex webadmin /usr/bin/configure-site
+
+# Use with prefix notation
+suex @deploy:deploygroup /usr/bin/deploy-app
 ```
 
 Using numeric IDs:
@@ -79,12 +96,12 @@ suex 100:1000 /bin/program
 # Create the suex group if it doesn't exist
 groupadd --system suex
 
-# Add users who should be able to use suex
-usermod -a -G suex username
-
 # Set the appropriate permissions on the suex binary
 chown root:suex suex
 chmod 4750 suex
+
+# Add users who should be able to use suex
+usermod -a -G suex username
 ```
 
 ### sush - Interactive Shell with Different Privileges
@@ -128,7 +145,23 @@ Launch a specific shell as another user:
 sush -s /bin/zsh username
 ```
 
-#### How suex and sush Complement Each Other
+#### Setup
+
+`sush` requires root privileges similar to `suex`. To set it up:
+
+```shell
+# Create the suex group if it doesn't exist
+groupadd --system suex
+
+# Set the appropriate permissions on the sush binary
+chown root:suex sush
+chmod 4750 sush
+
+# Add users who should be able to use suex
+usermod -a -G suex username
+```
+
+#### How `suex` and `sush` Complement Each Other
 
 `suex` and `sush` are designed to work together as a comprehensive privilege management solution:
 
@@ -139,6 +172,24 @@ Both utilities:
 - Share the same permission model (the `suex` group)
 - Provide direct execution for better TTY and signal handling
 - Offer a simpler alternative to traditional `su`/`sudo`
+
+## Advantages Over su/sudo
+
+The main advantage of these utilities is their direct execution model. When using traditional tools like `su` or `sudo`, commands are executed as child processes, which can lead to complications with TTY handling and signal processing. The tools in this package avoid these issues by executing programs directly.
+
+Example comparison:
+```shell
+# with su
+$ docker run -it --rm alpine:edge su postgres -c 'ps aux'
+PID   USER     TIME   COMMAND
+    1 postgres   0:00 ash -c ps aux
+   12 postgres   0:00 ps aux
+
+# with suex
+$ docker run -it --rm -v $PWD/suex:/sbin/suex:ro alpine:edge suex postgres ps aux
+PID   USER     TIME   COMMAND
+    1 postgres   0:00 ps aux
+```
 
 ## Additional Utilities in Detail
 
@@ -182,24 +233,6 @@ uarch [-a]
 ```
 
 For detailed usage information, see the [uarch documentation](#uarch-usage) below.
-
-## Advantages Over su/sudo
-
-The main advantage of these utilities is their direct execution model. When using traditional tools like `su` or `sudo`, commands are executed as child processes, which can lead to complications with TTY handling and signal processing. The tools in this package avoid these issues by executing programs directly.
-
-Example comparison:
-```shell
-# with su
-$ docker run -it --rm alpine:edge su postgres -c 'ps aux'
-PID   USER     TIME   COMMAND
-    1 postgres   0:00 ash -c ps aux
-   12 postgres   0:00 ps aux
-
-# with suex
-$ docker run -it --rm -v $PWD/suex:/sbin/suex:ro alpine:edge suex postgres ps aux
-PID   USER     TIME   COMMAND
-    1 postgres   0:00 ps aux
-```
 
 ## Detailed Documentation
 
