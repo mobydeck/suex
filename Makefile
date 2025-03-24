@@ -1,4 +1,4 @@
-CFLAGS ?= -Wall -Werror -g -s -w
+CFLAGS ?= -Wall -Werror -Wextra -g -s -w
 LDFLAGS ?=
 
 CC ?= gcc
@@ -16,14 +16,18 @@ all: $(PROG) $(PROG)-static
 .PHONY: build
 build: $(PROG)
 
-$(PROG): $(SRCS)
+.PHONY: auth_common.o
+auth_common.o: auth_common.c auth_common.h
+	$(CC) $(CFLAGS) -c auth_common.c
+
+$(PROG): $(SRCS) auth_common.o
 	$(CC) $(CFLAGS) -o $(BUILDDIR)/$@ $^ $(LDFLAGS)
 
-$(PROG)-static: $(SRCS)
+$(PROG)-static: $(SRCS) auth_common.o
 	$(CC) $(CFLAGS) -o $(BUILDDIR)/$@ $^ -static $(LDFLAGS)
 
 clean:
-	rm -f $(PROG) $(PROG)-static
+	rm -f $(PROG) $(PROG)-static *.o
 
 fmt:
 	docker run --rm -v "$$PWD":/src -w /src alpine:latest sh -c "apk add --no-cache indent && indent -linux $(SRCS) && indent -linux $(SRCS)"
@@ -33,8 +37,6 @@ fmt-all:
 
 release-all:
 	$(MAKE) release
-	$(MAKE) release PROG=usrx
-	$(MAKE) release PROG=uarch
 
 .PHONY: release
 release: $(archs)
@@ -48,6 +50,7 @@ $(archs):
 	done
 
 alpine-build-docker:
+	$(MAKE) clean
 	docker run --rm -v "$$PWD":/src -w /src -e PROGS="$(PROGS)" --platform linux/$(arch) alpine:latest sh -c "./alpine-build.sh"
 
 build-test-image:
@@ -58,6 +61,8 @@ test-suex:
 	c=`docker run --rm -d --platform linux/$(arch) suex-test sh -c "tail -f /dev/null"`; \
 	docker cp Makefile $$c:/test/ ;\
 	docker cp suex-test.sh $$c:/test/ ;\
+	docker cp auth_common.c $$c:/test/ ;\
+	docker cp auth_common.h $$c:/test/ ;\
 	docker cp suex.c $$c:/test/ ;\
 	docker exec $$c make build ;\
 	docker exec $$c chmod +x suex-test.sh ;\

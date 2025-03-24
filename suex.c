@@ -16,12 +16,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "auth_common.h"
+
 // Maximum path length for shell
 #define MAX_PATH 4096
-// Maximum number of groups to check
-#define MAX_GROUPS 100
-// Name of the group that can use this utility
-#define SUEX_GROUP "suex"
 // Default user to run as if no user is specified
 #define DEFAULT_USER "root"
 
@@ -59,48 +57,6 @@ static void die(int code, const char *fmt, ...)
 
 	fprintf(stderr, "\n");
 	exit(code);
-}
-
-/**
- * Check if the current user is in the specified group
- */
-static int user_in_group(const char *group_name)
-{
-	int ngroups = 0;
-	gid_t *groups = NULL;
-	struct group *gr;
-	int result = 0;
-
-	// Get the group ID for the specified group
-	gr = getgrnam(group_name);
-	if (gr == NULL) {
-		return 0;	// Group doesn't exist
-	}
-	// Get number of groups
-	ngroups = getgroups(0, NULL);
-	if (ngroups <= 0) {
-		return 0;
-	}
-	// Allocate memory for group list
-	groups = malloc(ngroups * sizeof(gid_t));
-	if (groups == NULL) {
-		return 0;
-	}
-	// Get group list
-	if (getgroups(ngroups, groups) == -1) {
-		free(groups);
-		return 0;
-	}
-	// Check if user belongs to the specified group
-	for (int i = 0; i < ngroups; i++) {
-		if (groups[i] == gr->gr_gid) {
-			result = 1;
-			break;
-		}
-	}
-
-	free(groups);
-	return result;
 }
 
 /**
@@ -260,7 +216,7 @@ int main(int argc, char *argv[])
 	}
 	// Check if we have permission to use suex
 	int is_root = (real_uid == 0);
-	int in_suex_group = user_in_group(SUEX_GROUP);
+	int in_suex_group = user_in_suex_group();
 
 	// Get real user info
 	real_pw = getpwuid(real_uid);
