@@ -320,15 +320,34 @@ Note: passing passwords as command-line arguments exposes them in process listin
 
 ### uarch
 
-Print a normalized architecture name for use in build scripts and cross-platform tooling.
+Print or convert architecture names for use in build scripts and cross-platform tooling.
 
 ```shell
-uarch        # normalized name: amd64, arm64, armv7, etc.
-uarch -a     # original kernel name: x86_64, aarch64, armv7l, etc.
-uarch -h     # help
+uarch              # normalized name of the current system: amd64, arm64, etc.
+uarch -a           # original kernel name: x86_64, aarch64, armv7l, etc.
+uarch x86_64       # convert a name: prints amd64
+uarch -a arm64     # convert to kernel name: prints aarch64
+uarch -h           # help
 ```
 
-Handles macOS architecture reporting quirks and maps kernel names to the names used by Linux package repositories and container registries.
+Works as both a detector (no argument) and a converter (argument given). Handles macOS architecture quirks and maps kernel names to the names used by Linux package repositories, container registries, and Go toolchains.
+
+| Kernel name | Normalized |
+|---|---|
+| x86_64 | amd64 |
+| i686, i586, i486, i386 | i386 |
+| aarch64, arm64 | arm64 |
+| armv7l, armv7 | armhf |
+| armv6l, armv5tel | armel |
+| riscv64 | riscv64 |
+| s390x | s390x |
+| ppc64le | ppc64el |
+| ppc64 | ppc64 |
+| mips64el | mips64el |
+| mips64 | mips64 |
+| mipsel | mipsel |
+| mips | mips |
+| loongarch64 | loong64 |
 
 ---
 

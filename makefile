@@ -8,37 +8,33 @@ BINDIR ?= $(PREFIX)/bin
 DESTDIR ?=
 
 IMAGE = suex-builder
-BUILDDIR ?= .
+BUILDDIR ?= ./build
 PROGS := suex sush usrx uarch
+AUTH_PROGS := suex sush
 PROG ?= suex
 SRCS := $(PROG).c
+AUTH_DEPS := $(if $(filter $(PROG),$(AUTH_PROGS)),auth_common.o,)
 
 archs = amd64 arm64
 arch ?= $(shell arch)
 
-all: $(PROG) $(PROG)-static
-
 .PHONY: build
-build: $(PROG)
+build: builddir $(BUILDDIR)/$(PROG)
+
+.PHONY: all
+all: builddir
+	for prog in $(PROGS); do $(MAKE) clean && $(MAKE) PROG=$$prog; done
 
 .PHONY: auth_common.o
 auth_common.o: auth_common.c auth_common.h
 	$(CC) $(CFLAGS) -c auth_common.c
 
-$(PROG): $(SRCS) auth_common.o
-	$(CC) $(CFLAGS) -o $(BUILDDIR)/$@ $^ $(LDFLAGS)
-	strip -s $(BUILDDIR)/$@
-
-$(PROG)-static: $(SRCS) auth_common.o
-	$(CC) $(CFLAGS) -o $(BUILDDIR)/$@ $^ -static $(LDFLAGS)
-	strip -s $(BUILDDIR)/$@
-
-.PHONY: all-progs
-all-progs:
-	for prog in $(PROGS); do $(MAKE) PROG=$$prog; done
+$(BUILDDIR)/$(PROG): $(SRCS) $(AUTH_DEPS)
+	$(CC) $(CFLAGS) -o $@ $^ -static $(LDFLAGS)
+	strip -s $@
 
 .PHONY: install
-install: builddir all-progs
+install: all
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 4755 $(BUILDDIR)/suex $(DESTDIR)$(BINDIR)/suex
 	install -m 4755 $(BUILDDIR)/sush $(DESTDIR)$(BINDIR)/sush
@@ -55,7 +51,10 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/usrx $(DESTDIR)$(BINDIR)/uarch
 
 clean:
-	rm -f $(PROG) $(PROG)-static *.o *.c~
+	rm -f *.o *.c~
+
+distclean: clean
+	rm -f $(addprefix $(BUILDDIR)/,$(PROGS)) $(addprefix $(BUILDDIR)/,$(addsuffix -static,$(PROGS)))
 
 fmt:
 	docker run --rm -v "$$PWD":/src -w /src alpine:latest sh -c "apk add --no-cache indent && indent -linux $(SRCS) && indent -linux $(SRCS)"
@@ -74,7 +73,7 @@ $(archs):
 	$(MAKE) build-docker arch=$@
 	export COPYFILE_DISABLE=true; \
 	for PROG in $(PROGS); do \
-		tar -czf ./release/$$PROG-linux-$@.tgz LICENSE -C ./build $$PROG $$PROG-static; \
+		tar -czf ./release/$$PROG-linux-$@.tgz LICENSE -C ./build $$PROG; \
 	done
 
 .PHONY: build-image
@@ -82,14 +81,14 @@ build-image:
 	docker build -t $(IMAGE):$(arch) --platform linux/$(arch) -f build.dockerfile .
 
 build-docker: build-image
-	$(MAKE) clean
+	$(MAKE) distclean
 	docker run --rm -v "$$PWD":/src -w /src -e PROGS="$(PROGS)" \
-	    --platform linux/$(arch) $(IMAGE):$(arch) sh -c "./build.sh"
+	    --platform linux/$(arch) $(IMAGE):$(arch) make all
 
 test-install-docker: build-image
-	$(MAKE) clean
+	$(MAKE) distclean
 	docker run --rm -v "$$PWD":/src -w /src -e BUILDDIR="/tmp/build" \
-	    --platform linux/$(arch) $(IMAGE):$(arch) sh -c "make install"
+	    --platform linux/$(arch) $(IMAGE):$(arch) make install
 
 build-test-image:
 	docker buildx build -t suex-test -f test.dockerfile --platform linux/$(arch) --load .
