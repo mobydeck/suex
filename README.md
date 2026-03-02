@@ -1,309 +1,268 @@
-# `suex` & `sush` - Lightweight Privilege Management Tools
+# suex & sush
 
-A collection of lightweight utilities written in C for privilege management and system information, with a focus on simplicity and security.
-They provide essential functionality for privilege management, process execution, and system information gathering in environments where traditional solutions may be too heavyweight or introduce unwanted dependencies.
-Ideal for developers, DevOps workflows, CI/CD pipelines, and containerized applications where reliability and performance at scale are paramount.
+**Lightweight privilege switching for the real world** — containers, CI pipelines, build systems, and anywhere `sudo` is overkill and `su-exec` is too blunt.
 
-## Core Utilities
+`suex` runs a command as another user. `sush` opens a shell as another user. Both use a direct `exec()` model with group-based access control. No config files. No password prompts. No daemons. No child processes.
 
-### suex
+```shell
+# Drop from root to app user — clean exec, correct PID, proper signals
+suex www-data nginx -g 'daemon off;'
 
-A lightweight privilege switching tool for executing commands with different user and group permissions. Think of it as a streamlined alternative to `sudo` and `su`.
+# Switch users from a CI agent (must be in the suex group)
+suex deploy /usr/local/bin/run-deployment
 
-### sush
+# Open an interactive shell as another user
+sush postgres
+```
 
-A companion shell launcher for `suex` that provides an interactive shell with the privileges of another user. While `suex` is designed for running specific commands, `sush` is optimized for interactive shell sessions.
+---
 
-## Additional Utilities
+## Why not sudo / su / gosu / su-exec?
+
+| Tool | Direct exec | Access control | Correct supplementary groups | Size |
+|---|---|---|---|---|
+| `sudo` | yes | sudoers (complex) | yes | ~2MB + PAM |
+| `su` | no (child process) | PAM | yes | ~50KB |
+| `gosu` | yes | none | yes | ~1.8MB (Go runtime) |
+| `su-exec` | yes | none | partial | ~10KB |
+| **`suex`** | **yes** | **Unix group** | **yes** | **~70KB** |
+
+The short version: `sudo` and `su` carry 45 years of multi-user timesharing assumptions into your container. `gosu` is correct but written in Go. `su-exec` is small and correct but has no access control — anyone who can execute it can become any user. `suex` adds group-based access control without any other overhead.
+
+The longer version: [sudo is 45 Years Old. Your Container Doesn't Care.](https://github.com/mobydeck/suex/blob/main/ARTICLE.md)
+
+---
+
+## How it works
+
+`suex` is a setuid root binary owned by root and executable only by members of the `suex` group. When invoked, it:
+
+1. Verifies the caller is root or in the `suex` group (checked by the kernel before any C code runs)
+2. Resolves the target user and group from `/etc/passwd`
+3. Sets up the full supplementary group list via `setgroups()`
+4. Calls `setgid()` then `setuid()`
+5. Calls `execvp()` — replacing itself entirely with your command
+
+After step 5, `suex` no longer exists in the process tree. Your command inherits the PID, file descriptors, and signal disposition directly. This is the same model the kernel uses for setuid binaries, applied to user switching.
+
+```
+# with su or sudo:
+PID 1 → sudo → your-command
+
+# with suex:
+PID 1 → your-command
+```
+
+---
+
+## Installation
+
+### From source
+
+```shell
+git clone https://github.com/mobydeck/suex
+cd suex
+make install   # installs to /usr/local/bin by default
+```
+
+### Manual
+
+Download the binary for your architecture from the [releases page](https://github.com/mobydeck/suex/releases), copy to `/usr/local/bin` or `/sbin`, then set permissions:
+
+```shell
+chown root:root suex sush
+chmod 4755 suex sush
+```
+
+### In a Dockerfile
+
+```dockerfile
+COPY suex /sbin/suex
+RUN chown root:root /sbin/suex && chmod 4755 /sbin/suex
+```
+
+---
+
+## Setup
+
+```shell
+# Create the access control group
+groupadd --system suex
+
+# Restrict the binaries to the suex group (recommended for shared hosts)
+chown root:suex suex sush
+chmod 4750 suex sush
+
+# Grant access to a user
+usermod -a -G suex youruser
+```
+
+The `chmod 4750` breakdown: `4` sets the setuid bit, `7` gives root full access, `5` gives the `suex` group read+execute, `0` locks out everyone else. Users outside the group cannot execute the binary at all — the kernel enforces this before a single line of code runs.
+
+For containers where any process can use `suex`, `chmod 4755` (world-executable) is fine.
+
+---
+
+## suex
+
+Run a command as another user.
+
+```shell
+suex [-l] [USER[:GROUP]] COMMAND [ARGS...]
+```
+
+**Options**
+
+- `-l` — login mode: clears the inherited environment and sets `HOME`, `USER`, `LOGNAME`, `SHELL`, `MAIL`, `PATH` for the target user. Working directory is unchanged.
+
+**User specification**
+
+- `USER` — username or numeric UID
+- `USER:GROUP` — username and group name (or numeric IDs)
+- `@USER` or `+USER` — prefix notation, same behavior
+- Omitting USER defaults to root (non-root callers in the `suex` group only)
+
+**Examples**
+
+```shell
+# Root dropping to a less privileged user
+suex www-data nginx -g 'daemon off;'
+suex nginx:www-data /usr/sbin/nginx -c /etc/nginx/nginx.conf
+suex nobody /bin/program
+
+# suex group member elevating to root
+suex /usr/sbin/iptables -L
+
+# suex group member switching to another user
+suex deploy /usr/local/bin/run-deployment
+suex @deploy:deploygroup /usr/bin/deploy-app
+
+# Using numeric IDs
+suex 100:1000 /bin/program
+
+# Login mode — clean environment
+suex -l postgres /usr/bin/pg_ctl start
+suex -l www-data /usr/bin/configure-site
+```
+
+**Dual behavior**
+
+- Called by root: steps down to a less privileged user (like `su`)
+- Called by a `suex` group member: elevates to root or switches to any user (like a password-free, config-free `sudo`)
+
+---
+
+## sush
+
+Open an interactive login shell as another user.
+
+```shell
+sush [-s SHELL] [USERNAME]
+```
+
+**Options**
+
+- `-s SHELL` — use a specific shell instead of the user's default
+- `USERNAME` — defaults to root if omitted
+
+`sush` sets up a clean login environment (`HOME`, `USER`, `LOGNAME`, `SHELL`, `MAIL`, `PATH`, `TERM`), changes to the target user's home directory, and launches the shell with a leading dash in `argv[0]` — the Unix convention that triggers login shell initialization (`.profile`, `.bash_profile`, etc.).
+
+PATH is always clean: `~/.local/bin` first, then the standard system path.
+
+**Examples**
+
+```shell
+sush                      # root shell
+sush postgres             # postgres user's default shell
+sush -s /bin/zsh deploy   # zsh as the deploy user
+```
+
+Uses the same permission model as `suex` — requires membership in the `suex` group.
+
+---
+
+## Container pattern
+
+The recommended entrypoint pattern for privilege-dropping containers:
+
+```dockerfile
+FROM debian:bookworm-slim
+
+COPY suex /sbin/suex
+RUN chown root:root /sbin/suex && chmod 4755 /sbin/suex
+
+COPY entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+```
+
+```shell
+#!/bin/sh
+# entrypoint.sh
+
+# Root-only initialization
+chown -R app:app /data
+# ... other setup ...
+
+# Hand off to the application — suex replaces itself via exec()
+# Result: PID 1 is your app, running as app, no wrappers
+exec suex app "$@"
+```
+
+The `exec` in the shell script replaces the shell with `suex`. `suex` then replaces itself with your application. Final result: one process, correct PID, correct user, correct signal handling.
+
+---
+
+## Security model
+
+Access control is handled entirely by standard Unix file permissions — no policy files, no configuration, no parser.
+
+**What you get:**
+- Access restricted to the `suex` group, enforced by the kernel before any userspace code runs
+- Full user context: correct UID, GID, and all supplementary groups
+- Tiny, auditable codebase — no plugins, no shared library loading, no complex parsing
+- Direct execution: no privilege manager remaining in the process tree
+
+**What you trade:**
+- No per-command whitelisting (if you need `alice` to run `systemctl` but not `bash`, use sudoers)
+- No password prompts (access is determined by group membership)
+- No per-command audit logging (group membership is your audit trail)
+
+For environments that need fine-grained command authorization or mandatory password confirmation, `sudo` is the right tool. `suex` is for environments where that machinery is overhead.
+
+---
+
+## Additional utilities
 
 ### usrx
 
-A utility for querying user information from system files (`/etc/passwd`, `/etc/group`, and `/etc/shadow`).
+Query user information from system files.
 
-### uarch
-
-A simple utility for displaying system architecture names in a standardized format, particularly useful for cross-platform development and build scripts.
-
-## Core Utilities in Detail
-
-### suex - Command Execution with Different Privileges
-
-`suex` allows you to run commands with different user and group privileges. Unlike traditional tools like `su` or `sudo`, `suex` executes programs directly rather than as child processes, which provides better handling of TTY and signals.
-
-#### Key Features
-
-- Direct program execution (not spawning child processes)
-- Dual privilege management model:
-    - For root users: Ability to step down to lower privileges (similar to `su`)
-    - For non-root users in the `suex` group: Ability to elevate to specific privileges or switch to any other user
-- Support for both username/group names and numeric uid/gid
-- Group-based access control (users in the `suex` group can execute commands with elevated privileges)
-- Better TTY and signal handling than traditional alternatives
-- Simpler and more streamlined than traditional `su`/`sudo`
-- Login mode (`-l`) for full login environment simulation, similar to `su -`
-- Extremely useful in dynamic development environments, build and test containers, and ephemeral systems
-
-#### Usage
-
-Basic syntax:
-```shell
-suex [-l] [USER[:GROUP]] COMMAND [ARGUMENTS...]
-```
-
-Where:
-- `-l`: Login mode — clear the inherited environment and set up a clean login environment (HOME, USER, LOGNAME, SHELL, MAIL, PATH). Working directory is unchanged.
-- `USER`: Username or numeric uid (optional for non-root users, defaults to root)
-- `GROUP`: (Optional) Group name or numeric gid
-- `COMMAND`: The program to execute
-- `ARGUMENTS`: Any additional arguments for the command
-
-You can also use the `@` or `+` prefix for the USER specification:
-```shell
-suex [-l] [@|+]USER[:GROUP] COMMAND [ARGUMENTS...]
-```
-
-#### Examples
-
-For root users (stepping down in privileges):
-```shell
-# Run as a non-privileged user
-suex nobody /bin/program
-
-# Run with specific user and group
-suex nginx:www-data /usr/sbin/nginx -c /etc/nginx/nginx.conf
-```
-
-For non-root users in the `suex` group (elevating or switching privileges):
-```shell
-# Elevate to root
-suex /bin/program
-
-# Switch to a different user
-suex webadmin /usr/bin/configure-site
-
-# Use with prefix notation
-suex @deploy:deploygroup /usr/bin/deploy-app
-```
-
-Using numeric IDs:
-```shell
-suex 100:1000 /bin/program
-```
-
-With login mode (clean environment, similar to `su - user -c cmd`):
-```shell
-# Run a command in the target user's clean login environment
-suex -l www-data /usr/bin/configure-site
-
-# Start a login shell for another user
-suex -l deploy /bin/bash
-```
-
-#### Setup
-
-`suex` requires root privileges to operate as it performs uid/gid changes. To set it up:
-
-```shell
-# Create the suex group if it doesn't exist
-groupadd --system suex
-
-# Set the appropriate permissions on the suex binary
-chown root:suex suex
-chmod 4750 suex
-
-# Add users who should be able to use suex
-usermod -a -G suex username
-```
-
-### sush - Interactive Shell with Different Privileges
-
-While `suex` is designed for running specific commands, `sush` provides an interactive shell with the privileges of another user. It's optimized for interactive use and properly sets up the shell environment.
-
-#### Key Features
-
-- Launches an interactive login shell as another user (equivalent to `su -`)
-- Sets up a clean login environment: HOME, USER, LOGNAME, SHELL, MAIL, PATH, TERM
-- PATH is always a system-default path plus the target user's `~/.local/bin`
-- Supports custom shell specification
-- Uses the same permission model as `suex` (requires membership in the `suex` group)
-- Changes to the target user's home directory
-
-#### Usage
-
-Basic syntax:
-```shell
-sush [OPTIONS] [USERNAME]
-```
-
-Options:
-- `-s SHELL`: Use a specific shell instead of the user's default
-
-If no username is specified, defaults to root.
-
-#### Examples
-
-Launch a shell as root:
-```shell
-sush
-```
-
-Launch a shell as another user:
-```shell
-sush username
-```
-
-Launch a specific shell as another user:
-```shell
-sush -s /bin/zsh username
-```
-
-#### Setup
-
-`sush` requires root privileges similar to `suex`. To set it up:
-
-```shell
-# Create the suex group if it doesn't exist
-groupadd --system suex
-
-# Set the appropriate permissions on the sush binary
-chown root:suex sush
-chmod 4750 sush
-
-# Add users who should be able to use suex
-usermod -a -G suex username
-```
-
-#### How `suex` and `sush` Complement Each Other
-
-`suex` and `sush` are designed to work together as a comprehensive privilege management solution:
-
-- **suex**: For running specific commands with different privileges
-- **sush**: For interactive shell sessions with different privileges
-
-Both utilities:
-- Share the same permission model (the `suex` group)
-- Provide direct execution for better TTY and signal handling
-- Offer a simpler alternative to traditional `su`/`sudo`
-
-## Advantages Over su/sudo
-
-The main advantage of these utilities is their direct execution model. When using traditional tools like `su` or `sudo`, commands are executed as child processes, which can lead to complications with TTY handling and signal processing. The tools in this package avoid these issues by executing programs directly.
-
-Example comparison:
-```shell
-# with su
-$ docker run -it --rm alpine:edge su postgres -c 'ps aux'
-PID   USER     TIME   COMMAND
-    1 postgres   0:00 ash -c ps aux
-   12 postgres   0:00 ps aux
-
-# with suex
-$ docker run -it --rm -v $PWD/suex:/sbin/suex:ro alpine:edge suex postgres ps aux
-PID   USER     TIME   COMMAND
-    1 postgres   0:00 ps aux
-```
-
-## Additional Utilities in Detail
-
-### usrx - User Information Utility
-
-`usrx` provides a simple command-line interface to retrieve various user-related information from system files. It can query basic user information, group memberships, and (with root privileges) password-related data.
-
-#### Key Features
-
-- Comprehensive user information querying from system files
-- Support for all standard user attributes (home, shell, groups, etc.)
-- Fast and efficient group membership resolution
-- Root-level access to shadow password information
-- Formatted output for both single values and complete user profiles
-
-#### Usage
-
-Basic syntax:
 ```shell
 usrx COMMAND [OPTIONS] USER
 ```
 
-For detailed usage information, see the [usrx documentation](#usrx-usage) below.
+**Commands** (available to all users)
 
-### uarch - Architecture Display Utility
+- `info [-j] [-i]` — full user profile; `-j` for JSON, `-i` to omit sensitive fields
+- `home` — home directory
+- `shell` — login shell
+- `gecos` — GECOS field
+- `id` — UID
+- `gid` — primary GID
+- `group` — primary group name
+- `groups` — all group memberships
 
-`uarch` is a simple utility for displaying system architecture names in a standardized format, particularly useful for cross-platform development and build scripts.
+**Commands** (root only)
 
-#### Key Features
+- `passwd` — encrypted password from `/etc/shadow`
+- `days` — password aging information
+- `check USER [PASSWORD]` — verify a password; reads from stdin if PASSWORD is omitted; exits 0 on match, 1 on failure
 
-- Maps system architecture to unofficial Linux architecture names
-- Handles special cases for macOS architecture reporting
-- Supports displaying original system architecture names
-- Works consistently across Linux and macOS platforms
+**JSON output**
 
-#### Usage
-
-Basic syntax:
 ```shell
-uarch [-a]
+usrx info -j username
 ```
-
-For detailed usage information, see the [uarch documentation](#uarch-usage) below.
-
-## Detailed Documentation
-
-### usrx usage
-
-Basic syntax:
-```shell
-usrx COMMAND [OPTIONS] USER
-```
-
-### `/etc/passwd` explained
-
-![/etc/passwd](assets/passwd.png)
-
-### `/etc/shadow` explained
-
-![/etc/shadow](assets/shadow.png)
-
-#### Options
-
-For `info` command:
-- `-j` - Output information in JSON format
-- `-i` - Skip encrypted password in output (useful for secure information display)
-
-#### Available Commands
-
-Standard commands (available to all users):
-- `info` - Display all available information about the user
-  ```shell
-  # Standard output
-  $ usrx info username
-  
-  # JSON output
-  $ usrx info -j username
-  
-  # Skip sensitive information
-  $ usrx info -i username
-  
-  # JSON output without sensitive information
-  $ usrx info -j -i username
-  ```
-- `home` - Print user's home directory
-- `shell` - Print user's login shell
-- `gecos` - Print user's GECOS field
-- `id` - Print user's UID
-- `gid` - Print user's primary GID
-- `group` - Print user's primary group name
-- `groups` - Print all groups the user belongs to
-
-Root-only commands (requires root privileges):
-- `passwd` - Print user's encrypted password
-- `days` - Print detailed password aging information
-- `check USER [PASSWORD]` - Verify if the provided password is correct
-  - If PASSWORD is omitted, reads password securely from stdin
-  - Returns exit code 0 if password is correct, 1 if incorrect
-
-#### JSON Output Format
-
-When using the `-j` option with the `info` command, the output is structured as follows:
 
 ```json
 {
@@ -330,143 +289,49 @@ When using the `-j` option with the `info` command, the output is structured as 
 }
 ```
 
-Note: The `shadow` section is only included when running as root, and the `encrypted_password` field is omitted when using the `-i` option.
+The `shadow` section only appears when running as root. `encrypted_password` is omitted with `-i`.
 
-#### Examples
+**`/etc/passwd` fields**
 
-Get user's home directory:
-```shell
-$ usrx home username
-/home/username
-```
+![/etc/passwd](assets/passwd.png)
 
-List all groups for a user:
-```shell
-$ usrx groups username
-users suex docker developers
-```
+**`/etc/shadow` fields**
 
-Get comprehensive user information (as root):
-```shell
-$ suex usrx info username
-User Information for 'username':
-------------------------
-Username: username
-User ID: 1000
-Primary group ID: 1000
-Primary group name: username
-Home directory: /home/username
-Shell: /bin/bash
-GECOS: John Doe
-Groups: username(1000), suex(27), docker(998)
+![/etc/shadow](assets/shadow.png)
 
-Shadow Information (root only):
------------------------------
-[password and aging information]
-```
-
-Get user info in standard format:
-```shell
-$ usrx info username
-```
-
-Get user info in JSON format:
-```shell
-$ usrx info -j username
-```
-
-Get user info without sensitive data:
-```shell
-$ usrx info -i username
-```
-
-### Password Verification Examples
-
-1. Exit codes:
-```shell
-# Returns exit code 0 if password is correct, 1 if incorrect
-$ suex usrx check username correctpassword
-$ echo $?
-0
-
-$ suex usrx check username wrongpassword
-$ echo $?
-1
-```
-
-2. Interactive password prompt:
-```shell
-$ suex usrx check username
-Password: [hidden input]
-```
-
-3. Password from command line (less secure):
-```shell
-$ suex usrx check username mypassword
-```
-
-4. Password from file:
-```shell
-$ suex usrx check username <password.txt
-```
-
-5. Password from pipe:
-```shell
-$ echo "mypassword" | suex usrx check username
-```
-
-Note: The `check` command does not produce any output - it only sets the exit code.
-For scripting, you can use it like this:
+**Password verification**
 
 ```shell
-if suex usrx check username userpassword; then
-    echo "Password is correct"
-else
-    echo "Password is incorrect"
+# Script usage — only exit code matters, no output
+if suex usrx check username "$PASSWORD"; then
+    echo "correct"
 fi
+
+# From a file
+suex usrx check username < password.txt
+
+# Interactive prompt
+suex usrx check username
 ```
 
-### Security Notes
+Note: passing passwords as command-line arguments exposes them in process listings and shell history. Use stdin redirection in scripts.
 
-- The `passwd` and `days` commands require root privileges as they access `/etc/shadow`
-- When installed setuid root (`suex chmod u+s usrx`), these commands become available to all users
-- Consider the security implications before setting the setuid bit
-- The `check` command receives password as a command line argument which may expose it in:
-    - Process listings (ps, top, etc.)
-    - Shell history
-    - System logs
-    - Other system monitoring tools
-    - When using file redirection or pipes, ensure that:
-        - The password file has appropriate permissions (600 or more restrictive)
-        - The password file is stored in a secure location
-        - The file is securely deleted after use
-        - The command is not visible in shell history
-- For production use, consider more secure password verification methods
+---
 
-### `uarch` usage
+### uarch
+
+Print a normalized architecture name for use in build scripts and cross-platform tooling.
+
 ```shell
-uarch [-a]
+uarch        # normalized name: amd64, arm64, armv7, etc.
+uarch -a     # original kernel name: x86_64, aarch64, armv7l, etc.
+uarch -h     # help
 ```
 
-Options:
-- `-a` - Print the original system architecture name instead of the unofficial name
-- `-h` - Show help message
+Handles macOS architecture reporting quirks and maps kernel names to the names used by Linux package repositories and container registries.
 
-#### Examples
-
-Print unofficial system architecture name:
-```shell
-$ uarch
-amd64
-```
-
-Print original system architecture name:
-```shell
-$ uarch -a
-x86_64
-```
+---
 
 ## Attribution
 
-`suex` is a reimplementation of [`su-exec`](https://github.com/ncopa/su-exec),
-enhanced for improved usability and maintainability.
+`suex` is a reimplementation of [`su-exec`](https://github.com/ncopa/su-exec) by ncopa, with extended functionality: group-based access control, login mode, proper supplementary group initialization, and the `sush` companion tool.
