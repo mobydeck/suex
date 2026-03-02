@@ -40,16 +40,18 @@ A simple utility for displaying system architecture names in a standardized form
 - Group-based access control (users in the `suex` group can execute commands with elevated privileges)
 - Better TTY and signal handling than traditional alternatives
 - Simpler and more streamlined than traditional `su`/`sudo`
+- Login mode (`-l`) for full login environment simulation, similar to `su -`
 - Extremely useful in dynamic development environments, build and test containers, and ephemeral systems
 
 #### Usage
 
 Basic syntax:
 ```shell
-suex [USER[:GROUP]] COMMAND [ARGUMENTS...]
+suex [-l] [USER[:GROUP]] COMMAND [ARGUMENTS...]
 ```
 
 Where:
+- `-l`: Login mode — clear the inherited environment and set up a clean login environment (HOME, USER, LOGNAME, SHELL, MAIL, PATH). Working directory is unchanged.
 - `USER`: Username or numeric uid (optional for non-root users, defaults to root)
 - `GROUP`: (Optional) Group name or numeric gid
 - `COMMAND`: The program to execute
@@ -57,7 +59,7 @@ Where:
 
 You can also use the `@` or `+` prefix for the USER specification:
 ```shell
-suex [@|+]USER[:GROUP] COMMAND [ARGUMENTS...]
+suex [-l] [@|+]USER[:GROUP] COMMAND [ARGUMENTS...]
 ```
 
 #### Examples
@@ -88,6 +90,15 @@ Using numeric IDs:
 suex 100:1000 /bin/program
 ```
 
+With login mode (clean environment, similar to `su - user -c cmd`):
+```shell
+# Run a command in the target user's clean login environment
+suex -l www-data /usr/bin/configure-site
+
+# Start a login shell for another user
+suex -l deploy /bin/bash
+```
+
 #### Setup
 
 `suex` requires root privileges to operate as it performs uid/gid changes. To set it up:
@@ -110,8 +121,9 @@ While `suex` is designed for running specific commands, `sush` provides an inter
 
 #### Key Features
 
-- Launches an interactive shell as another user
-- Properly sets up environment variables (HOME, USER, SHELL, etc.)
+- Launches an interactive login shell as another user (equivalent to `su -`)
+- Sets up a clean login environment: HOME, USER, LOGNAME, SHELL, MAIL, PATH, TERM
+- PATH is always a system-default path plus the target user's `~/.local/bin`
 - Supports custom shell specification
 - Uses the same permission model as `suex` (requires membership in the `suex` group)
 - Changes to the target user's home directory

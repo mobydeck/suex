@@ -30,13 +30,15 @@ static char *program_name;
  */
 static void usage(int exit_code)
 {
-	printf("Usage: %s [USER[:GROUP]] COMMAND [ARGUMENTS...]\n",
+	printf("Usage: %s [-l] [USER[:GROUP]] COMMAND [ARGUMENTS...]\n",
 	       basename(program_name));
-	printf("       %s +USER[:GROUP] COMMAND [ARGUMENTS...]\n",
+	printf("       %s [-l] +USER[:GROUP] COMMAND [ARGUMENTS...]\n",
 	       basename(program_name));
-	printf("       %s @USER[:GROUP] COMMAND [ARGUMENTS...]\n",
+	printf("       %s [-l] @USER[:GROUP] COMMAND [ARGUMENTS...]\n",
 	       basename(program_name));
 	printf("If USER is omitted and caller has permission, runs as root\n");
+	printf
+	    ("  -l  Login mode: clear environment, set HOME/USER/LOGNAME/SHELL/PATH\n");
 	exit(exit_code);
 }
 
@@ -199,6 +201,7 @@ int main(int argc, char *argv[])
 	char **cmd_argv;
 	int cmd_index = 1;
 	char *end;
+	int login_mode = 0;
 
 	uid_t real_uid = getuid();
 	uid_t effective_uid = geteuid();
@@ -213,6 +216,15 @@ int main(int argc, char *argv[])
 	// Check if we have enough arguments
 	if (argc < 2) {
 		usage(1);
+	}
+	// Check for -l (login mode) flag
+	if (argc >= 2 && strcmp(argv[1], "-l") == 0) {
+		login_mode = 1;
+		argv++;
+		argc--;
+		if (argc < 2) {
+			usage(1);
+		}
 	}
 	// Check if we have permission to use suex
 	int is_root = (real_uid == 0);
@@ -346,6 +358,36 @@ int main(int argc, char *argv[])
 
 	if (setuid(target_uid) < 0) {
 		die(1, "Failed to set UID to %d", target_uid);
+	}
+	// Login mode: clear environment and set up a clean login environment
+	if (login_mode) {
+		clearenv();
+		if (pw) {
+			setenv("HOME", pw->pw_dir, 1);
+			setenv("USER", pw->pw_name, 1);
+			setenv("LOGNAME", pw->pw_name, 1);
+			setenv("SHELL", pw->pw_shell, 1);
+			char mail[MAX_PATH];
+			snprintf(mail, MAX_PATH, "/var/mail/%s", pw->pw_name);
+			setenv("MAIL", mail, 1);
+			char path_buf[MAX_PATH];
+			if (target_uid == 0) {
+				snprintf(path_buf, MAX_PATH,
+					 "%s/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+					 pw->pw_dir);
+			} else {
+				snprintf(path_buf, MAX_PATH,
+					 "%s/.local/bin:/usr/local/bin:/usr/bin:/bin",
+					 pw->pw_dir);
+			}
+			setenv("PATH", path_buf, 1);
+		} else {
+			const char *sys_path = (target_uid == 0)
+			    ?
+			    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+			    : "/usr/local/bin:/usr/bin:/bin";
+			setenv("PATH", sys_path, 1);
+		}
 	}
 	// Execute the command
 	execvp(cmd_argv[0], cmd_argv);

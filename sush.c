@@ -106,7 +106,6 @@ int main(int argc, char *argv[])
 		NULL,		// PATH
 		NULL,		// MAIL
 		NULL,		// TERM
-		NULL,		// LS_COLORS
 		NULL		// Terminator
 	};
 
@@ -126,15 +125,18 @@ int main(int argc, char *argv[])
 	snprintf(logname_env, MAX_PATH, "LOGNAME=%s", pw->pw_name);
 	env_vars[3] = strdup(logname_env);
 
-	// Keep default PATH or set to a sensible default
-	char *path = getenv("PATH");
-	if (path) {
-		char path_env[MAX_PATH];
-		snprintf(path_env, MAX_PATH, "PATH=%s", path);
-		env_vars[4] = strdup(path_env);
+	// Set system-default PATH with user's ~/.local/bin
+	char path_buf[MAX_PATH];
+	if (pw->pw_uid == 0) {
+		snprintf(path_buf, MAX_PATH,
+			 "PATH=%s/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+			 pw->pw_dir);
 	} else {
-		env_vars[4] = strdup("PATH=/bin:/usr/bin");
+		snprintf(path_buf, MAX_PATH,
+			 "PATH=%s/.local/bin:/usr/local/bin:/usr/bin:/bin",
+			 pw->pw_dir);
 	}
+	env_vars[4] = strdup(path_buf);
 
 	char mail_env[MAX_PATH];
 	snprintf(mail_env, MAX_PATH, "MAIL=/var/mail/%s", pw->pw_name);
@@ -145,13 +147,6 @@ int main(int argc, char *argv[])
 		char term_env[MAX_PATH];
 		snprintf(term_env, MAX_PATH, "TERM=%s", term);
 		env_vars[6] = strdup(term_env);
-	}
-
-	char *ls_colors = getenv("LS_COLORS");
-	if (ls_colors) {
-		char ls_colors_env[MAX_PATH];
-		snprintf(ls_colors_env, MAX_PATH, "LS_COLORS=%s", ls_colors);
-		env_vars[7] = strdup(ls_colors_env);
 	}
 	// Switch to target user's primary group
 	if (setgid(pw->pw_gid) != 0) {
