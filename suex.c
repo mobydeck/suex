@@ -25,6 +25,41 @@
 
 static char *program_name;
 
+/*
+ * Build a PATH value for the target user.
+ * Strips trailing slashes from home and skips ~/.local/bin when home is "/"
+ * to avoid producing paths like //.local/bin.
+ */
+static void build_path(char *buf, size_t buflen, const char *home, int is_root)
+{
+	char h[MAX_PATH];
+	strncpy(h, home, MAX_PATH - 1);
+	h[MAX_PATH - 1] = '\0';
+	size_t len = strlen(h);
+	while (len > 1 && h[len - 1] == '/')
+		h[--len] = '\0';
+
+	int add_local = !(len == 1 && h[0] == '/');
+
+	if (is_root) {
+		if (add_local)
+			snprintf(buf, buflen,
+				 "%s/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+				 h);
+		else
+			snprintf(buf, buflen,
+				 "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+	} else {
+		if (add_local)
+			snprintf(buf, buflen,
+				 "%s/.local/bin:/usr/local/bin:/usr/bin:/bin",
+				 h);
+		else
+			snprintf(buf, buflen,
+				 "/usr/local/bin:/usr/bin:/bin");
+	}
+}
+
 /**
  * Display usage information and exit
  */
@@ -150,6 +185,24 @@ static int looks_like_command(const char *arg)
 		}
 	}
 
+	return 0;
+}
+
+/**
+ * Return 1 if the basename of cmd matches a known interactive shell
+ */
+static int is_shell(const char *cmd)
+{
+	static const char *shells[] = {
+		"sh", "bash", "zsh", "fish", "dash",
+		"ksh", "ksh93", "mksh", "csh", "tcsh", "ash", NULL
+	};
+	const char *base = strrchr(cmd, '/');
+	base = base ? base + 1 : cmd;
+	for (int i = 0; shells[i]; i++) {
+		if (strcmp(base, shells[i]) == 0)
+			return 1;
+	}
 	return 0;
 }
 
@@ -366,20 +419,13 @@ int main(int argc, char *argv[])
 			setenv("HOME", pw->pw_dir, 1);
 			setenv("USER", pw->pw_name, 1);
 			setenv("LOGNAME", pw->pw_name, 1);
-			setenv("SHELL", pw->pw_shell, 1);
+			setenv("SHELL", is_shell(cmd_argv[0]) ? cmd_argv[0] : pw->pw_shell, 1);
 			char mail[MAX_PATH];
 			snprintf(mail, MAX_PATH, "/var/mail/%s", pw->pw_name);
 			setenv("MAIL", mail, 1);
 			char path_buf[MAX_PATH];
-			if (target_uid == 0) {
-				snprintf(path_buf, MAX_PATH,
-					 "%s/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-					 pw->pw_dir);
-			} else {
-				snprintf(path_buf, MAX_PATH,
-					 "%s/.local/bin:/usr/local/bin:/usr/bin:/bin",
-					 pw->pw_dir);
-			}
+			build_path(path_buf, MAX_PATH, pw->pw_dir,
+				   target_uid == 0);
 			setenv("PATH", path_buf, 1);
 		} else {
 			const char *sys_path = (target_uid == 0)

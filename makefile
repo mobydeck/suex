@@ -29,8 +29,10 @@ all: builddir
 auth_common.o: auth_common.c auth_common.h
 	$(CC) $(CFLAGS) -c auth_common.c
 
+STATIC ?= -static
+
 $(BUILDDIR)/$(PROG): $(SRCS) $(AUTH_DEPS)
-	$(CC) $(CFLAGS) -o $@ $^ -static $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $^ $(STATIC) $(LDFLAGS)
 	strip -s $@
 
 .PHONY: install
@@ -95,13 +97,9 @@ build-test-image:
 
 .PHONY: test-suex
 test-suex: build-test-image
-	c=`docker run --rm -d --platform linux/$(arch) suex-test sh -c "tail -f /dev/null"`; \
-	docker cp makefile $$c:/test/ ;\
-	docker cp suex-test.sh $$c:/test/ ;\
-	docker cp auth_common.c $$c:/test/ ;\
-	docker cp auth_common.h $$c:/test/ ;\
-	docker cp suex.c $$c:/test/ ;\
-	docker exec $$c make build ;\
-	docker exec $$c chmod +x suex-test.sh ;\
-	docker exec $$c ./suex-test.sh ;\
-	docker stop $$c
+	@set -e; \
+	c=$$(docker run --rm -d --platform linux/$(arch) suex-test sh -c "tail -f /dev/null"); \
+	trap "docker stop $$c >/dev/null" EXIT; \
+	tar -cf - makefile suex-test.sh auth_common.c auth_common.h suex.c | docker exec -i $$c tar -xf - -C /test; \
+	docker exec $$c make build BUILDDIR=. STATIC=; \
+	docker exec $$c ./suex-test.sh

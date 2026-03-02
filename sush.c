@@ -12,6 +12,40 @@
 // Maximum path length for shell
 #define MAX_PATH 4096
 
+/*
+ * Build a PATH value for the target user.
+ * Strips trailing slashes from home and skips ~/.local/bin when home is "/"
+ * to avoid producing paths like //.local/bin.
+ */
+static void build_path(char *buf, size_t buflen, const char *home, int is_root)
+{
+	char h[MAX_PATH];
+	strncpy(h, home, MAX_PATH - 1);
+	h[MAX_PATH - 1] = '\0';
+	size_t len = strlen(h);
+	while (len > 1 && h[len - 1] == '/')
+		h[--len] = '\0';
+
+	int add_local = !(len == 1 && h[0] == '/');
+
+	if (is_root) {
+		if (add_local)
+			snprintf(buf, buflen,
+				 "PATH=%s/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+				 h);
+		else
+			snprintf(buf, buflen,
+				 "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+	} else {
+		if (add_local)
+			snprintf(buf, buflen,
+				 "PATH=%s/.local/bin:/usr/local/bin:/usr/bin:/bin",
+				 h);
+		else
+			snprintf(buf, buflen, "PATH=/usr/local/bin:/usr/bin:/bin");
+	}
+}
+
 void usage(const char *progname)
 {
 	fprintf(stderr, "Usage: %s [OPTIONS] [USERNAME]\n\n", progname);
@@ -127,15 +161,7 @@ int main(int argc, char *argv[])
 
 	// Set system-default PATH with user's ~/.local/bin
 	char path_buf[MAX_PATH];
-	if (pw->pw_uid == 0) {
-		snprintf(path_buf, MAX_PATH,
-			 "PATH=%s/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-			 pw->pw_dir);
-	} else {
-		snprintf(path_buf, MAX_PATH,
-			 "PATH=%s/.local/bin:/usr/local/bin:/usr/bin:/bin",
-			 pw->pw_dir);
-	}
+	build_path(path_buf, MAX_PATH, pw->pw_dir, pw->pw_uid == 0);
 	env_vars[4] = strdup(path_buf);
 
 	char mail_env[MAX_PATH];
