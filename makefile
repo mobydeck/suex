@@ -14,6 +14,7 @@ AUTH_PROGS := suex sush
 PROG ?= suex
 SRCS := $(PROG).c
 AUTH_DEPS := $(if $(filter $(PROG),$(AUTH_PROGS)),auth_common.o,)
+ENV_COMMON_DEPS := $(if $(filter $(PROG),$(AUTH_PROGS)),env_common.h,)
 
 archs = amd64 arm64
 arch ?= $(shell arch)
@@ -31,8 +32,8 @@ auth_common.o: auth_common.c auth_common.h
 
 STATIC ?= -static
 
-$(BUILDDIR)/$(PROG): $(SRCS) $(AUTH_DEPS)
-	$(CC) $(CFLAGS) -o $@ $^ $(STATIC) $(LDFLAGS)
+$(BUILDDIR)/$(PROG): $(SRCS) $(AUTH_DEPS) $(ENV_COMMON_DEPS)
+	$(CC) $(CFLAGS) -o $@ $(SRCS) $(AUTH_DEPS) $(STATIC) $(LDFLAGS)
 	strip -s $@
 
 .PHONY: install
@@ -100,6 +101,6 @@ test-suex: build-test-image
 	@set -e; \
 	c=$$(docker run --rm -d --platform linux/$(arch) suex-test sh -c "tail -f /dev/null"); \
 	trap "docker stop $$c >/dev/null" EXIT; \
-	tar -cf - makefile suex-test.sh auth_common.c auth_common.h suex.c | docker exec -i $$c tar -xf - -C /test; \
+	tar -cf - makefile suex-test.sh auth_common.c auth_common.h env_common.h suex.c | docker exec -i $$c tar -xf - -C /test; \
 	docker exec $$c make build BUILDDIR=. STATIC=; \
 	docker exec $$c ./suex-test.sh

@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "auth_common.h"
+#include "env_common.h"
 
 // Maximum path length for shell
 #define MAX_PATH 4096
@@ -131,49 +132,56 @@ int main(int argc, char *argv[])
 	sprintf(shell_args[0], "-%s", shell_name);	// Login shell convention
 	shell_args[1] = NULL;
 
-	// Set up environment variables for the user
-	char *env_vars[] = {
-		NULL,		// HOME
-		NULL,		// SHELL
-		NULL,		// USER
-		NULL,		// LOGNAME
-		NULL,		// PATH
-		NULL,		// MAIL
-		NULL,		// TERM
-		NULL		// Terminator
-	};
+	// Count how many session vars are actually set
+	int n_session = 0;
+	for (int i = 0; session_vars[i]; i++) {
+		if (getenv(session_vars[i]))
+			n_session++;
+	}
+
+	// Allocate env array: 6 fixed + inherited session vars + terminator
+	int env_count = 0;
+	char **env_vars = malloc((6 + n_session + 1) * sizeof(char *));
+	if (!env_vars) {
+		perror("Failed to allocate memory");
+		exit(EXIT_FAILURE);
+	}
 
 	char home[MAX_PATH];
 	snprintf(home, MAX_PATH, "HOME=%s", pw->pw_dir);
-	env_vars[0] = strdup(home);
+	env_vars[env_count++] = strdup(home);
 
 	char shell_env[MAX_PATH];
 	snprintf(shell_env, MAX_PATH, "SHELL=%s", shell_path);
-	env_vars[1] = strdup(shell_env);
+	env_vars[env_count++] = strdup(shell_env);
 
 	char user_env[MAX_PATH];
 	snprintf(user_env, MAX_PATH, "USER=%s", pw->pw_name);
-	env_vars[2] = strdup(user_env);
+	env_vars[env_count++] = strdup(user_env);
 
 	char logname_env[MAX_PATH];
 	snprintf(logname_env, MAX_PATH, "LOGNAME=%s", pw->pw_name);
-	env_vars[3] = strdup(logname_env);
+	env_vars[env_count++] = strdup(logname_env);
 
 	// Set system-default PATH with user's ~/.local/bin
 	char path_buf[MAX_PATH];
 	build_path(path_buf, MAX_PATH, pw->pw_dir, pw->pw_uid == 0);
-	env_vars[4] = strdup(path_buf);
+	env_vars[env_count++] = strdup(path_buf);
 
 	char mail_env[MAX_PATH];
 	snprintf(mail_env, MAX_PATH, "MAIL=/var/mail/%s", pw->pw_name);
-	env_vars[5] = strdup(mail_env);
+	env_vars[env_count++] = strdup(mail_env);
 
-	char *term = getenv("TERM");
-	if (term) {
-		char term_env[MAX_PATH];
-		snprintf(term_env, MAX_PATH, "TERM=%s", term);
-		env_vars[6] = strdup(term_env);
+	// Inherit session/terminal variables
+	for (int i = 0; session_vars[i]; i++) {
+		char *val = getenv(session_vars[i]);
+		if (val) {
+			char buf[MAX_PATH];
+			snprintf(buf, MAX_PATH, "%s=%s", session_vars[i], val);
+			env_vars[env_count++] = strdup(buf);
+		}
 	}
+	env_vars[env_count] = NULL;
 	// Switch to target user's primary group
 	if (setgid(pw->pw_gid) != 0) {
 		perror("Failed to set group ID");
@@ -204,9 +212,10 @@ int main(int argc, char *argv[])
 
 	// Clean up allocated memory (though we shouldn't reach here)
 	free(shell_args[0]);
-	for (int i = 0; env_vars[i] != NULL; i++) {
+	for (int i = 0; i < env_count; i++) {
 		free(env_vars[i]);
 	}
+	free(env_vars);
 
 	return EXIT_FAILURE;
 }

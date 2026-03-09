@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "auth_common.h"
+#include "env_common.h"
 
 // Maximum path length for shell
 #define MAX_PATH 4096
@@ -412,6 +413,14 @@ int main(int argc, char *argv[])
 	if (setuid(target_uid) < 0) {
 		die(1, "Failed to set UID to %d", target_uid);
 	}
+	// Save session/terminal variables before potential clearenv
+	char *saved_session[32];
+	int n_saved = 0;
+	for (int i = 0; session_vars[i]; i++, n_saved++) {
+		char *val = getenv(session_vars[i]);
+		saved_session[i] = val ? strdup(val) : NULL;
+	}
+
 	// Login mode: clear environment and set up a clean login environment
 	if (login_mode) {
 		clearenv();
@@ -433,6 +442,12 @@ int main(int argc, char *argv[])
 			    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 			    : "/usr/local/bin:/usr/bin:/bin";
 			setenv("PATH", sys_path, 1);
+		}
+		for (int i = 0; i < n_saved; i++) {
+			if (saved_session[i]) {
+				setenv(session_vars[i], saved_session[i], 1);
+				free(saved_session[i]);
+			}
 		}
 	}
 	// Execute the command

@@ -113,7 +113,7 @@ suex [-l] [USER[:GROUP]] COMMAND [ARGS...]
 
 **Options**
 
-- `-l` — login mode: clears the inherited environment and sets `HOME`, `USER`, `LOGNAME`, `SHELL`, `MAIL`, `PATH` for the target user. Working directory is unchanged.
+- `-l` — login mode: clears the inherited environment and sets `HOME`, `USER`, `LOGNAME`, `SHELL`, `MAIL`, `PATH` for the target user. Terminal and session variables (`TERM`, `COLORTERM`, `LANG`, `LC_*`, `DISPLAY`, `TMUX`, `SSH_*`, etc.) are inherited from the calling environment. Working directory is unchanged.
 
 **User specification**
 
@@ -165,7 +165,7 @@ sush [-s SHELL] [USERNAME]
 - `-s SHELL` — use a specific shell instead of the user's default
 - `USERNAME` — defaults to root if omitted
 
-`sush` sets up a clean login environment (`HOME`, `USER`, `LOGNAME`, `SHELL`, `MAIL`, `PATH`, `TERM`), changes to the target user's home directory, and launches the shell with a leading dash in `argv[0]` — the Unix convention that triggers login shell initialization (`.profile`, `.bash_profile`, etc.).
+`sush` sets up a clean login environment (`HOME`, `USER`, `LOGNAME`, `SHELL`, `MAIL`, `PATH`) and inherits terminal and session variables (`TERM`, `COLORTERM`, `LANG`, `LC_*`, `DISPLAY`, `TMUX`, `SSH_*`, etc.) from the calling environment. It changes to the target user's home directory and launches the shell with a leading dash in `argv[0]` — the Unix convention that triggers login shell initialization (`.profile`, `.bash_profile`, etc.).
 
 PATH is always clean: `~/.local/bin` first, then the standard system path.
 
